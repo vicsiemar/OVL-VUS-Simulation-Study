@@ -78,27 +78,10 @@ OVL_teorico <- function(mu1, sd1, mu2, sd2, mu3, sd3) {
   return(res_OVL$value)  
 }
 
-transformBoxCox <- function(data) {
-  x <- data[1:nx[k]]
-  y <- data[(nx[k] + 1):(nx[k] + ny[k])]
-  z <- data[(nx[k] + ny[k] + 1):(nx[k] + ny[k] + nz[k])]
-  minimum <- min(min(x), min(y), min(z))
-  
-  # Reescalado si el mínimo es <0
-  if (minimum < 0) {
-    x <- x - minimum + 1
-    y <- y - minimum + 1
-    z <- z - minimum + 1
-  }
-  
-  return(c(x, y, z))
-}
-
-
-likbox=function(h,data){
-  x <- data[1:nx[k]]
-  y <- data[(nx[k] + 1):(nx[k] + ny[k])]
-  z <- data[(nx[k] + ny[k] + 1):(nx[k] + ny[k] + nz[k])]
+likbox=function(h,data,n){
+  x <- data[1:n]
+  y <- data[(n + 1):(n + n)]
+  z <- data[(n + n + 1):(n + n + n)]
   if (abs(h)<1e-5){
     xh<-log(x)
     yh<-log(y)
@@ -108,37 +91,104 @@ likbox=function(h,data){
     yh<-((y^h)-1)/h
     zh<-((z^h)-1)/h
   }
-  oout=-nx[k]/2*log(sum((xh-sum(xh)/nx[k])^2)/nx[k])-ny[k]/2*log(sum((yh-sum(yh)/ny[k])^2)/ny[k])-
-    nz[k]/2*log(sum((zh-sum(zh)/nz[k])^2)/nz[k])+(h-1)*(sum(log(x))+sum(log(y))+sum(log(z)))
+  oout=-n/2*log(sum((xh-sum(xh)/n)^2)/n)-n/2*log(sum((yh-sum(yh)/n)^2)/n)-
+    n/2*log(sum((zh-sum(zh)/n)^2)/n)+(h-1)*(sum(log(x))+sum(log(y))+sum(log(z)))
   return(-oout)
 }
 
-IC_percentil <- function(x, y, z, B, alpha) {
-  nx = length(x)
-  ny = length(y)
-  nz = length(z)
+IC_AN <- function(x, y, z, B, alpha) {
+xo = x
+yo = y 
+zo = z
+
+  nx = length(xo)
+  ny = length(yo)
+  nz = length(zo)
+
+h_ini=-0.6  #Parámetro a optimizar, valor inicial
+  all_values<-c(x,y,z)
+  if (any(all_values<=0)){
+    x<-x+abs(min(all_values))+(max(all_values)-min(all_values))/2
+    y<-y+abs(min(all_values))+(max(all_values)-min(all_values))/2
+    z<-z+abs(min(all_values))+(max(all_values)-min(all_values))/2
+  }
+  
+hhat_BFGS=try({optim(h_ini,likbox,data=c(x,y,z),n=length(x),method="BFGS")$par},silent=TRUE)
+    if(class(hhat_BFGS)=="try-error"){
+      hhat_LBFGSB= try({optim(h_ini,likbox,data=c(x,y,z),n=length(x),method="L-BFGS-B",lower=-2,upper=2)$par},silent=TRUE)
+      if(class(hhat_LBFGSB)=="try-error"){
+        hhat_NM= try({optim(h_ini,likbox,data=c(x,y,z),n=length(x),method="Nelder-Mead")$par},silent=TRUE)
+        if(class(hhat_NM)=="try-error"){hhat=h_ini}else{hhat=hhat_NM}
+      }else{hhat= hhat_LBFGSB}
+    }else{hhat=hhat_BFGS}
+
+if (abs(hhat)<1e-5){
+    x=log(x)
+    y=log(y)
+    z=log(z)
+  } else {
+    x=((x^hhat)-2)/hhat
+    y=((y^hhat)-2)/hhat
+    z=((z^hhat)-2)/hhat
+  }
+
+
+mu1 <- mean(x); mu2 <- mean(y); mu3 <- mean(z)
+sd1 <- sd(x); sd2 <- sd(y); sd3 <- sd(z)
+#Estimadores en la muestra original transformada
+OVL_B_parametrico_o <- OVL_parametrico(mu1, sd1, mu2, sd2, mu3, sd3)
+OVL_B_kernel_o = ovl_kernel(x, y, z, "gauss")
+
   
   OVL_B_parametrico = numeric(B)
   OVL_B_kernel = numeric(B)
   
   for (b in 1:B) {
     # Bootstrap de las muestras
-    xB = sample(x, nx, replace = TRUE)
-    yB = sample(y, ny, replace = TRUE)
-    zB = sample(z, nz, replace = TRUE)
+    xB = sample(xo, nx, replace = TRUE)
+    yB = sample(yo, ny, replace = TRUE)
+    zB = sample(zo, nz, replace = TRUE)
     
+ h_ini=-0.6  #Parámetro a optimizar, valor inicial
+  all_values<-c(xB,yB,zB)
+  if (any(all_values<=0)){
+    xB<-xB+abs(min(all_values))+(max(all_values)-min(all_values))/2
+    yB<-yB+abs(min(all_values))+(max(all_values)-min(all_values))/2
+    zB<-zB+abs(min(all_values))+(max(all_values)-min(all_values))/2
+  }
+  
+hhat_BFGS=try({optim(h_ini,likbox,data=c(xB,yB,zB),n=length(xB),method="BFGS")$par},silent=TRUE)
+    if(class(hhat_BFGS)=="try-error"){
+      hhat_LBFGSB= try({optim(h_ini,likbox,data=c(xB,yB,zB),n=length(xB),method="L-BFGS-B",lower=-2,upper=2)$par},silent=TRUE)
+      if(class(hhat_LBFGSB)=="try-error"){
+        hhat_NM= try({optim(h_ini,likbox,data=c(xB,yB,zB),n=length(xB),method="Nelder-Mead")$par},silent=TRUE)
+        if(class(hhat_NM)=="try-error"){hhat=h_ini}else{hhat=hhat_NM}
+      }else{hhat= hhat_LBFGSB}
+    }else{hhat=hhat_BFGS}
+
+if (abs(hhat)<1e-5){
+    x=log(xB)
+    y=log(yB)
+    z=log(zB)
+  } else {
+    x=((xB^hhat)-2)/hhat
+    y=((yB^hhat)-2)/hhat
+    z=((zB^hhat)-2)/hhat
+  }
+
     # Paramétrico
-    mu1 <- mean(xB); mu2 <- mean(yB); mu3 <- mean(zB)
-    sd1 <- sd(xB); sd2 <- sd(yB); sd3 <- sd(zB)
+    mu1 <- mean(x); mu2 <- mean(y); mu3 <- mean(z)
+    sd1 <- sd(x); sd2 <- sd(y); sd3 <- sd(z)
+
     OVL_B_parametrico[b] <- OVL_parametrico(mu1, sd1, mu2, sd2, mu3, sd3)
     
     # Kernel
-    OVL_B_kernel[b] = ovl_kernel(xB, yB, zB, "gauss")
+    OVL_B_kernel[b] = ovl_kernel(x, y, z, "gauss")
   }
   
   # Intervalos de confianza percentiles
-  IC_parametrico = quantile(OVL_B_parametrico, c(alpha / 2, 1 - alpha / 2))
-  IC_kernel = quantile(OVL_B_kernel, c(alpha / 2, 1 - alpha / 2))
+  IC_parametrico = c(OVL_B_parametrico_o-qnorm(1 - alpha / 2)*sd(OVL_B_parametrico),OVL_B_parametrico_o+qnorm(1 - alpha / 2)*sd(OVL_B_parametrico))
+  IC_kernel = c(OVL_B_kernel_o-qnorm(1 - alpha / 2)*sd(OVL_B_kernel),OVL_B_kernel_o+qnorm(1 - alpha / 2)*sd(OVL_B_kernel))
   
   return(list(IC_parametrico = IC_parametrico, IC_kernel = IC_kernel))
 }
@@ -167,7 +217,7 @@ for (t in 1:MC){
   z=rnorm(nz[k],1,1)
   
   #Para calcular la cobertura
-  resultados_IC=IC_percentil(x,y,z,B=500,alpha=0.05)
+  resultados_IC=IC_AN(x,y,z,B=500,alpha=0.05)
   contador_param=contador_param + 
     (resultados_IC$IC_parametrico[1] <= OVL_teorico & OVL_teorico <= resultados_IC$IC_parametrico[2])
   contador_ker=contador_ker + 
